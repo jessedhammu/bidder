@@ -108,14 +108,14 @@ $html .= '</div></div>';
 
 $html .= '<table><thead><tr>
 <th style="width:28%;">Title</th>
-<th style="width:7%;">Base</th>
+<th style="width:7%;">Base Price</th>
 <th style="width:6%;">Curr</th>
 <th style="width:8%;">INR</th>
-<th style="width:8%;">Gross</th>
+<th style="width:8%;">Gross Price</th>
 <th style="width:6%;">Disc %</th>
 <th style="width:8%;">Disc Amt</th>
-<th style="width:8%;">Net</th>
-<th style="width:6%;">Supply</th>
+<th style="width:8%;">Net Payable</th>
+<th style="width:6%;">Supply Days</th>
 <th style="width:15%;">Remarks</th>
 </tr></thead><tbody>';
 

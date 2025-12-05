@@ -7,6 +7,7 @@ if (isset($_SESSION['user'])) {
     else header('Location: ' . BASE_URL . 'vendor/dashboard.php');
     exit;
 }
+
 ?>
 <!doctype html>
 <html>

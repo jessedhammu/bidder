@@ -97,39 +97,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$err) {
-            foreach ($books as $book) {
-                $bid = $book['id'];
-                // skip if nothing submitted for this book
-                if (!isset($_POST['base_price'][$bid]) || $_POST['base_price'][$bid] === '') continue;
+            // Save (create or update multiple books)
+// NOTE: treat blank base_price as "no quote" (skip). Only accept base > 0
+foreach ($books as $book) {
+    $bid = $book['id'];
 
-                $base = floatval($_POST['base_price'][$bid]);
-                if ($base <= 0) continue;
+    // skip if vendor didn't touch this row (no POST value and no edit_single)
+    if (!isset($_POST['base_price'][$bid]) && !isset($_POST['edit_single'][$bid])) continue;
 
-                $currency = $_POST['currency_code'][$bid] ?? 'INR';
-                if (!in_array($currency, $currencyCodes)) $currency = 'INR';
+    // If base_price field is present but empty string, treat as "no quote" -> skip
+    $raw_base = isset($_POST['base_price'][$bid]) ? trim($_POST['base_price'][$bid]) : '';
+    if ($raw_base === '') {
+        // vendor left it blank — skip this book (no quote)
+        continue;
+    }
 
-                $discount = isset($_POST['discount_percent'][$bid]) ? floatval($_POST['discount_percent'][$bid]) : 0.0;
-                $supply = isset($_POST['supply_time_days'][$bid]) && $_POST['supply_time_days'][$bid] !== '' ? (int)$_POST['supply_time_days'][$bid] : null;
-                $remarks = isset($_POST['vendor_remarks'][$bid]) ? trim($_POST['vendor_remarks'][$bid]) : null;
+    // now parse numeric base and require > 0
+    if (!is_numeric($raw_base)) {
+        // invalid numeric input, skip this book (alternatively you could set an error)
+        continue;
+    }
+    $base = floatval($raw_base);
+    if ($base <= 0) {
+        // treat zero or negative as "no quote"
+        continue;
+    }
 
-                // authoritative server-side calculation (2 decimals)
-                try {
-                    $calc = calculate_prices($base, $currency, $book['copies_required'], $discount, date('Y-m-d', strtotime($basket['published_at'])));
-                } catch (Exception $e) {
-                    // fallback to embedded rates
-                    $rate = $rates[$currency] ?? 1.0;
-                    $inr_price_fallback = round($base * $rate, 2);
-                    $gross_fallback = round($inr_price_fallback * $book['copies_required'], 2);
-                    $discount_amount_fallback = round($gross_fallback * ($discount / 100.0), 2);
-                    $net_fallback = round($gross_fallback - $discount_amount_fallback, 2);
-                    $calc = [
-                        'inr_price' => $inr_price_fallback,
-                        'gross_price' => $gross_fallback,
-                        'discount_amount' => $discount_amount_fallback,
-                        'net_payable' => $net_fallback
-                    ];
-                }
+    $currency = $_POST['currency_code'][$bid] ?? 'INR';
+    // validate currency is allowed (admin-managed)
+    if (!in_array($currency, $currencyCodes)) {
+        // fallback: set to INR
+        $currency = 'INR';
+    }
+    $discount = isset($_POST['discount_percent'][$bid]) ? floatval($_POST['discount_percent'][$bid]) : 0.0;
+    $supply = isset($_POST['supply_time_days'][$bid]) && $_POST['supply_time_days'][$bid] !== '' ? (int)$_POST['supply_time_days'][$bid] : null;
+    $remarks = isset($_POST['vendor_remarks'][$bid]) ? trim($_POST['vendor_remarks'][$bid]) : null;
 
+    // Server-side calculation (authoritative)
+    try {
+        $calc = calculate_prices($base, $currency, $book['copies_required'], $discount, date('Y-m-d', strtotime($basket['published_at'])));
+    } catch (Exception $e) {
+        // fallback to client-side embedded rates if server helper fails
+        $rate = $rates[$currency] ?? 1.0;
+        $inr_price_fallback = round($base * $rate, 2);
+        $gross_fallback = round($inr_price_fallback * $book['copies_required'], 2);
+        $discount_amount_fallback = round($gross_fallback * ($discount / 100.0), 2);
+        $net_fallback = round($gross_fallback - $discount_amount_fallback, 2);
+        $calc = [
+            'inr_price' => $inr_price_fallback,
+            'gross_price' => $gross_fallback,
+            'discount_amount' => $discount_amount_fallback,
+            'net_payable' => $net_fallback
+        ];
+    }
+
+    // upsert quote for vendor, book
+    $stmtq = $pdo->prepare('SELECT * FROM quotes WHERE basket_id = ? AND book_id = ? AND vendor_id = ?');
+    $stmtq->execute([$basket_id, $bid, $user['id']]);
+    $existing = $stmtq->fetch();
+    $after = [
+        'base_price' => $base,
+        'currency_code' => $currency,
+        'inr_price' => $calc['inr_price'],
+        'copies' => $book['copies_required'],
+        'gross_price' => $calc['gross_price'],
+        'discount_percent' => $discount,
+        'discount_amount' => $calc['discount_amount'],
+        'net_payable' => $calc['net_payable'],
+        'supply_time_days' => $supply,
+        'vendor_remarks' => $remarks
+    ];
+    if ($existing) {
+        $before = $existing;
+        $qstmt = $pdo->prepare('UPDATE quotes SET base_price=?, currency_code=?, inr_price=?, copies=?, gross_price=?, discount_percent=?, discount_amount=?, net_payable=?, supply_time_days=?, vendor_remarks=?, submitted_at=NOW() WHERE id=?');
+        $qstmt->execute([$base, $currency, $calc['inr_price'], $book['copies_required'], $calc['gross_price'], $discount, $calc['discount_amount'], $calc['net_payable'], $supply, $remarks, $existing['id']]);
+        audit_log('UPDATE_QUOTE', 'quote', $existing['id'], $before, $after);
+    } else {
+        $qstmt = $pdo->prepare('INSERT INTO quotes (basket_id, book_id, vendor_id, base_price, currency_code, inr_price, copies, gross_price, discount_percent, discount_amount, net_payable, supply_time_days, vendor_remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $qstmt->execute([$basket_id, $bid, $user['id'], $base, $currency, $calc['inr_price'], $book['copies_required'], $calc['gross_price'], $discount, $calc['discount_amount'], $calc['net_payable'], $supply, $remarks]);
+        $newId = $pdo->lastInsertId();
+        audit_log('CREATE_QUOTE', 'quote', $newId, null, $after);
+    }
+}
                 // upsert
                 $stmtq = $pdo->prepare('SELECT * FROM quotes WHERE basket_id = ? AND book_id = ? AND vendor_id = ?');
                 $stmtq->execute([$basket_id, $bid, $user['id']]);
@@ -164,7 +213,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
     }
-}
 
 // fetch vendor's existing quotes for this basket (to show in the submitted table or prefill form)
 $vendorQuotes = [];
@@ -290,7 +338,7 @@ if ($edit_book_id && isset($vendorQuotes[$edit_book_id])) {
   <div class="form-check mb-2 no-print">
     <input class="form-check-input" type="checkbox" value="1" id="agree_terms" name="agree_terms">
     <label class="form-check-label" for="agree_terms">
-      I have read and agree to the <a href="/terms.html" target="_blank">Terms and Conditions</a>, and I certify that the information provided in the submitted quotes is accurate.
+      I have read and agree to the <a href="bidder/terms.php" target="_blank">Terms and Conditions</a>, and I certify that the information provided in the submitted quotes is accurate.
     </label>
   </div>
 
@@ -314,7 +362,7 @@ if ($edit_book_id && isset($vendorQuotes[$edit_book_id])) {
 <h4 class="mt-4 no-print">Your Submitted Quotes</h4>
 <div class="table-responsive submitted-area">
 <table class="table table-striped table-wider-sub printed-content" style="width:100%;">
-<thead><tr><th>Title</th><th>Base</th><th>Currency</th><th>INR Price</th><th>Gross</th><th>Discount %</th><th>Discount Amount</th><th>Net</th><th>Supply</th><th>Remarks</th>
+<thead><tr><th>Title</th><th>Base</th><th>Currency</th><th>INR Price</th><th>Gross</th><th>Discount %</th><th>Discount Amount</th><th>Net</th><th>Supply Days</th><th>Remarks</th>
 <?php if ($editable): ?><th class="no-print">Actions</th><?php endif; ?>
 </tr></thead>
 <tbody>
@@ -421,14 +469,24 @@ document.addEventListener('DOMContentLoaded', function() {
         processRow(id);
     });
 
-    // prevent double submits: disable Save button after click (for the single Save btn)
-    const saveBtn = document.getElementById('saveAllBtn');
-    if (saveBtn) {
-        saveBtn.addEventListener('click', function() {
-            saveBtn.disabled = true;
-            saveBtn.textContent = 'Saving...';
+    // Handle form submit: set "Saving..." on the button that triggered the submit
+    const form = document.getElementById('quotesForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            // modern browsers provide e.submitter (the button used to submit the form)
+            var submitBtn = (typeof e.submitter !== 'undefined' && e.submitter) ? e.submitter : document.getElementById('saveAllBtn');
+            // disable all submit buttons to prevent double-submits
+            const buttons = form.querySelectorAll('button[type="submit"]');
+            buttons.forEach(b => { try { b.disabled = true; } catch (err) {} });
+            // update only the clicked button text to indicate progress
+            if (submitBtn) {
+                submitBtn.dataset.origText = submitBtn.textContent;
+                submitBtn.textContent = 'Saving...';
+            }
+            // allow normal submission to proceed (do NOT call e.preventDefault())
         });
     }
+
 
     // Terms checkbox logic: enable Save only when checked
     const agree = document.getElementById('agree_terms');
