@@ -77,7 +77,7 @@ body{ font-family: DejaVu Sans, Arial, sans-serif; font-size:11px; color:#000; }
 .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 .header .left { text-align:left; }
 .header .right { text-align:right; }
-table{ border-collapse:collapse; width:100%; table-layout: fixed; font-size:10px; }
+table{ border-collapse:collapse; width:100%; table-layout: fixed; font-size:8px; }
 th, td{ border:1px solid #ccc; padding:6px; vertical-align:top; word-wrap:break-word; word-break:break-word; white-space:normal; hyphens:auto; }
 th{ background:#f3f3f3; font-weight:600; }
 .small { font-size:9px; color:#555; }
@@ -86,13 +86,13 @@ th{ background:#f3f3f3; font-weight:600; }
 .col-authors { width:10%; }
 .col-pub { width:10%; }
 .col-isbn { width:6%; }
-.col-volume { width:4%; }
+.col-copies { width:4%; }
 .col-base { width:7%; text-align:right; }
 .col-curr { width:4%; text-align:left; }
 .col-inr { width:7%; text-align:right; }
 .col-gross { width:7%; text-align:right; }
 .col-discpct { width:5%; text-align:right; }
-.col-discamt { width:7%; text-align:right; }
+.col-discamt { width:5%; text-align:right; }
 .col-net { width:7%; text-align:right; }
 .col-supply { width:4%; text-align:center; }
 .col-remarks { width:4%; } 
@@ -127,7 +127,7 @@ $html .= '<table><thead><tr>
 <th class="col-authors">Author(s)</th>
 <th class="col-pub">Publisher</th>
 <th class="col-isbn">ISBN</th>
-<th class="col-volume">Vol</th>
+<th class="col-copies">Copies</th>
 <th class="col-base">Base Price</th>
 <th class="col-curr">Curr</th>
 <th class="col-inr">INR</th>
@@ -149,7 +149,7 @@ if (empty($rows)) {
         $html .= '<td>' . nl2br(htmlspecialchars($q['authors'])) . '</td>';
     	$html .= '<td>' . nl2br(htmlspecialchars($q['publisher'])) . '</td>';
         $html .= '<td>' . nl2br(htmlspecialchars($q['isbn'])) . '</td>';
-        $html .= '<td>' . nl2br(htmlspecialchars($q['volume'])) . '</td>';
+    	$html .= '<td>' . nl2br(htmlspecialchars($q['copies_required'])) . '</td>';
         $html .= '<td style="text-align:right;">' . number_format((float)$q['base_price'], 2) . '</td>';
         $html .= '<td style="text-align:center;">' . htmlspecialchars($q['currency_code']) . '</td>';
         $html .= '<td style="text-align:right;">' . number_format((float)$q['inr_price'], 2) . '</td>';
