@@ -78,9 +78,24 @@ body{ font-family: DejaVu Sans, Arial, sans-serif; font-size:11px; color:#000; }
 .header .left { text-align:left; }
 .header .right { text-align:right; }
 table{ border-collapse:collapse; width:100%; table-layout: fixed; font-size:10px; }
-th, td{ border:1px solid #ccc; padding:6px; vertical-align:top; word-wrap:break-word; }
+th, td{ border:1px solid #ccc; padding:6px; vertical-align:top; word-wrap:break-word; word-break:break-word; white-space:normal; hyphens:auto; }
 th{ background:#f3f3f3; font-weight:600; }
 .small { font-size:9px; color:#555; }
+/* Column widths tuned for A4 landscape */
+.col-title { width:16%; }
+.col-authors { width:10%; }
+.col-pub { width:10%; }
+.col-isbn { width:6%; }
+.col-volume { width:4%; }
+.col-base { width:7%; text-align:right; }
+.col-curr { width:4%; text-align:left; }
+.col-inr { width:7%; text-align:right; }
+.col-gross { width:7%; text-align:right; }
+.col-discpct { width:5%; text-align:right; }
+.col-discamt { width:7%; text-align:right; }
+.col-net { width:7%; text-align:right; }
+.col-supply { width:4%; text-align:center; }
+.col-remarks { width:4%; } 
 </style></head><body>';
 
 // --- Header: vendor name + optional email/phone ---
@@ -106,35 +121,56 @@ $html .= '</div></div>';
 // --- end header ---
 
 
+// Table header (now includes Authors, ISBN, Volume; remarks reduced)
 $html .= '<table><thead><tr>
-<th style="width:28%;">Title</th>
-<th style="width:7%;">Base Price</th>
-<th style="width:6%;">Curr</th>
-<th style="width:8%;">INR</th>
-<th style="width:8%;">Gross Price</th>
-<th style="width:6%;">Disc %</th>
-<th style="width:8%;">Disc Amt</th>
-<th style="width:8%;">Net Payable</th>
-<th style="width:6%;">Supply Days</th>
-<th style="width:15%;">Remarks</th>
+<th class="col-title">Title</th>
+<th class="col-authors">Author(s)</th>
+<th class="col-pub">Publisher</th>
+<th class="col-isbn">ISBN</th>
+<th class="col-volume">Vol</th>
+<th class="col-base">Base Price</th>
+<th class="col-curr">Curr</th>
+<th class="col-inr">INR</th>
+<th class="col-gross">Gross</th>
+<th class="col-discpct">Disc %</th>
+<th class="col-discamt">Disc Amt</th>
+<th class="col-net">Net Payable</th>
+<th class="col-supply">Supply Days</th>
+<th class="col-remarks">Remarks</th>
 </tr></thead><tbody>';
 
-foreach ($rows as $q) {
-    $html .= '<tr>';
-    $html .= '<td>' . htmlspecialchars($q['title']) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['base_price'], 2) . '</td>';
-    $html .= '<td style="text-align:center;">' . htmlspecialchars($q['currency_code']) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['inr_price'], 2) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['gross_price'], 2) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['discount_percent'], 2) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['discount_amount'], 2) . '</td>';
-    $html .= '<td style="text-align:right;">' . number_format((float)$q['net_payable'], 2) . '</td>';
-    $html .= '<td style="text-align:center;">' . htmlspecialchars($q['supply_time_days']) . '</td>';
-    $html .= '<td>' . htmlspecialchars($q['vendor_remarks']) . '</td>';
-    $html .= '</tr>';
+if (empty($rows)) {
+    // colspan should match number of columns (13)
+    $html .= '<tr><td colspan="13">No quotes submitted for this basket.</td></tr>';
+} else {
+    foreach ($rows as $q) {
+        $html .= '<tr>';
+        $html .= '<td>' . nl2br(htmlspecialchars($q['title'])) . '</td>';
+        $html .= '<td>' . nl2br(htmlspecialchars($q['authors'])) . '</td>';
+    	$html .= '<td>' . nl2br(htmlspecialchars($q['publisher'])) . '</td>';
+        $html .= '<td>' . nl2br(htmlspecialchars($q['isbn'])) . '</td>';
+        $html .= '<td>' . nl2br(htmlspecialchars($q['volume'])) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['base_price'], 2) . '</td>';
+        $html .= '<td style="text-align:center;">' . htmlspecialchars($q['currency_code']) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['inr_price'], 2) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['gross_price'], 2) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['discount_percent'], 2) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['discount_amount'], 2) . '</td>';
+        $html .= '<td style="text-align:right;">' . number_format((float)$q['net_payable'], 2) . '</td>';
+        $html .= '<td style="text-align:center;">' . htmlspecialchars($q['supply_time_days']) . '</td>';
+        // remarks smaller column; enable line breaks for long remarks
+        $html .= '<td>' . nl2br(htmlspecialchars($q['vendor_remarks'])) . '</td>';
+        $html .= '</tr>';
+    }
 }
 
 $html .= '</tbody></table>';
+
+$html .= '<div style="margin-top:8px;font-size:10px;color:#333;">';
+$html .= 'Submission Date: ' . htmlspecialchars($submission_date) . ' &nbsp; | &nbsp; Vendor: ' . htmlspecialchars($displayName);
+$html .= '</div>';
+
+// close body/html
 $html .= '</body></html>';
 
 // ----------------- Dompdf autoload -----------------
@@ -243,3 +279,4 @@ try {
     echo "An error occurred while generating the PDF. Check server logs for details.";
     exit;
 }
+?>
