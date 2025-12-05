@@ -98,88 +98,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!$err) {
             // Save (create or update multiple books)
-// NOTE: treat blank base_price as "no quote" (skip). Only accept base > 0
-foreach ($books as $book) {
-    $bid = $book['id'];
+            // NOTE: treat blank base_price as "no quote" (skip). Only accept base > 0
+            foreach ($books as $book) {
+                $bid = $book['id'];
 
-    // skip if vendor didn't touch this row (no POST value and no edit_single)
-    if (!isset($_POST['base_price'][$bid]) && !isset($_POST['edit_single'][$bid])) continue;
+                // skip if vendor didn't touch this row (no POST value and no edit_single)
+                if (!isset($_POST['base_price'][$bid]) && !isset($_POST['edit_single'][$bid])) continue;
 
-    // If base_price field is present but empty string, treat as "no quote" -> skip
-    $raw_base = isset($_POST['base_price'][$bid]) ? trim($_POST['base_price'][$bid]) : '';
-    if ($raw_base === '') {
-        // vendor left it blank — skip this book (no quote)
-        continue;
-    }
+                // If base_price field is present but empty string, treat as "no quote" -> skip
+                $raw_base = isset($_POST['base_price'][$bid]) ? trim($_POST['base_price'][$bid]) : '';
+                if ($raw_base === '') {
+                    // vendor left it blank — skip this book (no quote)
+                    continue;
+                }
 
-    // now parse numeric base and require > 0
-    if (!is_numeric($raw_base)) {
-        // invalid numeric input, skip this book (alternatively you could set an error)
-        continue;
-    }
-    $base = floatval($raw_base);
-    if ($base <= 0) {
-        // treat zero or negative as "no quote"
-        continue;
-    }
+                // now parse numeric base and require > 0
+                if (!is_numeric($raw_base)) {
+                    // invalid numeric input, skip this book (alternatively you could set an error)
+                    continue;
+                }
+                $base = floatval($raw_base);
+                if ($base <= 0) {
+                    // treat zero or negative as "no quote"
+                    continue;
+                }
 
-    $currency = $_POST['currency_code'][$bid] ?? 'INR';
-    // validate currency is allowed (admin-managed)
-    if (!in_array($currency, $currencyCodes)) {
-        // fallback: set to INR
-        $currency = 'INR';
-    }
-    $discount = isset($_POST['discount_percent'][$bid]) ? floatval($_POST['discount_percent'][$bid]) : 0.0;
-    $supply = isset($_POST['supply_time_days'][$bid]) && $_POST['supply_time_days'][$bid] !== '' ? (int)$_POST['supply_time_days'][$bid] : null;
-    $remarks = isset($_POST['vendor_remarks'][$bid]) ? trim($_POST['vendor_remarks'][$bid]) : null;
+                $currency = $_POST['currency_code'][$bid] ?? 'INR';
+                // validate currency is allowed (admin-managed)
+                if (!in_array($currency, $currencyCodes)) {
+                    // fallback: set to INR
+                    $currency = 'INR';
+                }
+                $discount = isset($_POST['discount_percent'][$bid]) ? floatval($_POST['discount_percent'][$bid]) : 0.0;
+                $supply = isset($_POST['supply_time_days'][$bid]) && $_POST['supply_time_days'][$bid] !== '' ? (int)$_POST['supply_time_days'][$bid] : null;
+                $remarks = isset($_POST['vendor_remarks'][$bid]) ? trim($_POST['vendor_remarks'][$bid]) : null;
 
-    // Server-side calculation (authoritative)
-    try {
-        $calc = calculate_prices($base, $currency, $book['copies_required'], $discount, date('Y-m-d', strtotime($basket['published_at'])));
-    } catch (Exception $e) {
-        // fallback to client-side embedded rates if server helper fails
-        $rate = $rates[$currency] ?? 1.0;
-        $inr_price_fallback = round($base * $rate, 2);
-        $gross_fallback = round($inr_price_fallback * $book['copies_required'], 2);
-        $discount_amount_fallback = round($gross_fallback * ($discount / 100.0), 2);
-        $net_fallback = round($gross_fallback - $discount_amount_fallback, 2);
-        $calc = [
-            'inr_price' => $inr_price_fallback,
-            'gross_price' => $gross_fallback,
-            'discount_amount' => $discount_amount_fallback,
-            'net_payable' => $net_fallback
-        ];
-    }
+                // Server-side calculation (authoritative)
+                try {
+                    $calc = calculate_prices($base, $currency, $book['copies_required'], $discount, date('Y-m-d', strtotime($basket['published_at'])));
+                } catch (Exception $e) {
+                    // fallback to client-side embedded rates if server helper fails
+                    $rate = $rates[$currency] ?? 1.0;
+                    $inr_price_fallback = round($base * $rate, 2);
+                    $gross_fallback = round($inr_price_fallback * $book['copies_required'], 2);
+                    $discount_amount_fallback = round($gross_fallback * ($discount / 100.0), 2);
+                    $net_fallback = round($gross_fallback - $discount_amount_fallback, 2);
+                    $calc = [
+                        'inr_price' => $inr_price_fallback,
+                        'gross_price' => $gross_fallback,
+                        'discount_amount' => $discount_amount_fallback,
+                        'net_payable' => $net_fallback
+                    ];
+                }
 
-    // upsert quote for vendor, book
-    $stmtq = $pdo->prepare('SELECT * FROM quotes WHERE basket_id = ? AND book_id = ? AND vendor_id = ?');
-    $stmtq->execute([$basket_id, $bid, $user['id']]);
-    $existing = $stmtq->fetch();
-    $after = [
-        'base_price' => $base,
-        'currency_code' => $currency,
-        'inr_price' => $calc['inr_price'],
-        'copies' => $book['copies_required'],
-        'gross_price' => $calc['gross_price'],
-        'discount_percent' => $discount,
-        'discount_amount' => $calc['discount_amount'],
-        'net_payable' => $calc['net_payable'],
-        'supply_time_days' => $supply,
-        'vendor_remarks' => $remarks
-    ];
-    if ($existing) {
-        $before = $existing;
-        $qstmt = $pdo->prepare('UPDATE quotes SET base_price=?, currency_code=?, inr_price=?, copies=?, gross_price=?, discount_percent=?, discount_amount=?, net_payable=?, supply_time_days=?, vendor_remarks=?, submitted_at=NOW() WHERE id=?');
-        $qstmt->execute([$base, $currency, $calc['inr_price'], $book['copies_required'], $calc['gross_price'], $discount, $calc['discount_amount'], $calc['net_payable'], $supply, $remarks, $existing['id']]);
-        audit_log('UPDATE_QUOTE', 'quote', $existing['id'], $before, $after);
-    } else {
-        $qstmt = $pdo->prepare('INSERT INTO quotes (basket_id, book_id, vendor_id, base_price, currency_code, inr_price, copies, gross_price, discount_percent, discount_amount, net_payable, supply_time_days, vendor_remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)');
-        $qstmt->execute([$basket_id, $bid, $user['id'], $base, $currency, $calc['inr_price'], $book['copies_required'], $calc['gross_price'], $discount, $calc['discount_amount'], $calc['net_payable'], $supply, $remarks]);
-        $newId = $pdo->lastInsertId();
-        audit_log('CREATE_QUOTE', 'quote', $newId, null, $after);
-    }
-}
-                // upsert
+                // upsert quote for vendor, book
                 $stmtq = $pdo->prepare('SELECT * FROM quotes WHERE basket_id = ? AND book_id = ? AND vendor_id = ?');
                 $stmtq->execute([$basket_id, $bid, $user['id']]);
                 $existing = $stmtq->fetch();
@@ -213,6 +185,7 @@ foreach ($books as $book) {
             exit;
         }
     }
+}
 
 // fetch vendor's existing quotes for this basket (to show in the submitted table or prefill form)
 $vendorQuotes = [];
@@ -283,10 +256,10 @@ if ($edit_book_id && isset($vendorQuotes[$edit_book_id])) {
   <div class="table-responsive no-print">
   <table class="table table-bordered table-wider" style="width:100%;">
   <thead><tr>
-    <th>Title</th><th>Authors</th><th>Publisher</th><th>ISBN</th><th>Volume</th><th>Copies</th>
+    <th>Title</th><th>Authors</th><th>Publisher</th><th>ISBN</th><th>Copies</th>
     <th>Base Price</th><th>Currency</th>
     <th>INR Price</th><th>Gross Price</th><th>Discount %</th><th>Discount Amount</th><th>Net Payable</th>
-    <th>Supply Days</th><th>Vendor Remarks</th>
+    <th>Supply Days</th><th>Remarks (If Any)</th>
   </tr></thead>
   <tbody>
   <?php foreach ($books as $b):
@@ -303,7 +276,6 @@ if ($edit_book_id && isset($vendorQuotes[$edit_book_id])) {
     <td><?php echo htmlspecialchars($b['authors']); ?></td>
     <td><?php echo htmlspecialchars($b['publisher']); ?></td>
     <td><?php echo htmlspecialchars($b['isbn']); ?></td>
-    <td><?php echo htmlspecialchars($b['volume']); ?></td>
     <td class="small-muted"><?php echo (int)$b['copies_required']; ?></td>
 
     <td><input name="base_price[<?php echo $b['id']; ?>]" id="base_<?php echo $b['id']; ?>" value="<?php echo htmlspecialchars($pref_base); ?>" class="form-control input-num"></td>
@@ -362,18 +334,24 @@ if ($edit_book_id && isset($vendorQuotes[$edit_book_id])) {
 <h4 class="mt-4 no-print">Your Submitted Quotes</h4>
 <div class="table-responsive submitted-area">
 <table class="table table-striped table-wider-sub printed-content" style="width:100%;">
-<thead><tr><th>Title</th><th>Base</th><th>Currency</th><th>INR Price</th><th>Gross</th><th>Discount %</th><th>Discount Amount</th><th>Net</th><th>Supply Days</th><th>Remarks</th>
+<thead><tr>
+  <th>Title</th><th>Authors</th><th>Publisher</th><th>ISBN</th><th>Copies</th>
+  <th>Base Price</th><th>Currency</th><th>INR Price</th><th>Gross Price</th><th>Discount %</th><th>Discount Amount</th><th>Net Payable</th><th>Supply Days</th><th>Remarks</th>
 <?php if ($editable): ?><th class="no-print">Actions</th><?php endif; ?>
 </tr></thead>
 <tbody>
 <?php
-$stmt = $pdo->prepare('SELECT q.*, b.title FROM quotes q JOIN books b ON q.book_id=b.id WHERE q.basket_id=? AND q.vendor_id=?');
+$stmt = $pdo->prepare('SELECT q.*, b.title, b.authors, b.publisher, b.isbn, b.copies_required as book_copies FROM quotes q JOIN books b ON q.book_id=b.id WHERE q.basket_id=? AND q.vendor_id=?');
 $stmt->execute([$basket_id, $user['id']]);
 $rows = $stmt->fetchAll();
 foreach ($rows as $q):
 ?>
 <tr>
   <td><?php echo htmlspecialchars($q['title']); ?></td>
+  <td><?php echo htmlspecialchars($q['authors']); ?></td>
+  <td><?php echo htmlspecialchars($q['publisher']); ?></td>
+  <td><?php echo htmlspecialchars($q['isbn']); ?></td>
+  <td><?php echo (int)$q['book_copies']; ?></td>
   <td><?php echo number_format((float)$q['base_price'], 2); ?></td>
   <td><?php echo htmlspecialchars($q['currency_code']); ?></td>
   <td><?php echo number_format((float)$q['inr_price'], 2); ?></td>
